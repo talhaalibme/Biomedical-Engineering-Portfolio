@@ -1,0 +1,26 @@
+# BraTS2020 — 2D U-Net Segmentation & Survival Prediction (MATLAB)
+
+**Overview**  
+MATLAB pipeline for brain tumor segmentation and survival analysis using the BraTS 2020 dataset.  
+Steps:
+1. Preprocess NIfTI → PNG slices (`Step_1_Preprocess_Data.m`)
+2. Train 2D U-Net (light/aug variants) (`Step_2_Train_Unet.m`)
+3. Slice-by-slice inference, radiomic feature extraction, and Cox survival modeling (`Step_3_Run_Survival_2D.m`)
+
+**Repository structure**
+- `Code/` — MATLAB scripts and helper functions
+- `Results/` — extracted feature tables, sample outputs
+- `Figures/` — sample overlays (Input | GroundTruth | Prediction)
+- `DataLinks/Dataset_Link.txt` — download link for BraTS2020 dataset (do NOT upload raw data)
+
+**How to run (short)**
+1. Download BraTS2020 training data and extract to local disk (see `DataLinks/Dataset_Link.txt`).
+2. Open MATLAB R2023a, set current folder to `Code/`.
+3. Run `Step_1_Preprocess_Data.m` then `Step_2_Train_Unet.m` (light version for CPU), and `Step_3_Run_Survival_2D.m`.
+
+**Notes**
+- Tested on MATLAB R2023a with Image Processing & Deep Learning Toolboxes on a CPU laptop (Lenovo T460s).  
+- Large files (.nii) are not included here — see `DataLinks/Dataset_Link.txt`.
+
+**Contact**
+Talha Ali — (talha.ali.bme@gmail.com) — GitHub: `talhaalibme`
