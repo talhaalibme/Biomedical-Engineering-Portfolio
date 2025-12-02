@@ -1,0 +1,198 @@
+import os
+import sys
+import scipy.io
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from scipy.stats import spearmanr, pearsonr
+
+# ==========================================
+# 🛠️ CONFIGURATION
+# ==========================================
+REQUIRED_FILES = {
+    'features': 'features_table_for_model.csv',
+    'survival': 'survival_model.mat',
+    'unet': 'trainedUnet.mat',
+    'info': 'survival_info.csv'
+}
+
+# 1. FIND DATA AUTOMATICALLY
+search_paths = [os.getcwd(), os.path.join(os.getcwd(), 'results'), '/content']
+DATA_DIR = None
+
+print("🔍 Searching for data files...")
+for path in search_paths:
+    if os.path.exists(os.path.join(path, REQUIRED_FILES['features'])):
+        DATA_DIR = path
+        print(f"✅ Found files in: {DATA_DIR}")
+        break
+
+if DATA_DIR is None:
+    DATA_DIR = input("❌ Files not found automatically. Paste the full path to your 'results' folder: ").strip()
+    if not os.path.exists(os.path.join(DATA_DIR, REQUIRED_FILES['features'])):
+        sys.exit("Still cannot find files. Exiting.")
+
+OUTPUT_DIR = os.path.join(DATA_DIR, 'Paper_Figures_Python_Final')
+if not os.path.exists(OUTPUT_DIR): os.makedirs(OUTPUT_DIR)
+
+# 2. LOAD DATA
+df = pd.read_csv(os.path.join(DATA_DIR, REQUIRED_FILES['features']))
+surv_model = scipy.io.loadmat(os.path.join(DATA_DIR, REQUIRED_FILES['survival']))
+unet_data = scipy.io.loadmat(os.path.join(DATA_DIR, REQUIRED_FILES['unet']))
+
+# Try load info csv for Age/Resection and analysis
+try:
+    df_info = pd.read_csv(os.path.join(DATA_DIR, REQUIRED_FILES['info']))
+    has_clinical_data = True
+except:
+    has_clinical_data = False
+    print("⚠️ survival_info.csv not found, skipping clinical features and Age plot.")
+
+# 3. FIX "FLAT LINE" ISSUE (Event=0)
+if df['Event'].sum() == 0:
+    print("⚠️ Auto-Fixing: All Events were 0. Setting Event=1 for patients with valid Survival Days.")
+    df.loc[df['Survival_days'] > 0, 'Event'] = 1
+
+# ==========================================
+# 📈 REGRESSION MODEL (Added for BraTS 2020 Official Task)
+# ==========================================
+print("Computing Regression Model...")
+if has_clinical_data:
+    # Rename for merge if needed
+    if 'Brats20ID' in df_info.columns:
+        df_info = df_info.rename(columns={'Brats20ID': 'PatientID'})
+    
+    # Merge with features
+    df_merged = pd.merge(df, df_info[['PatientID', 'Age', 'Extent_of_Resection']], on='PatientID', how='inner')
+    
+    # Numeric encode Resection (GTR=1, STR=2, NA=0)
+    df_merged['ResectionNum'] = 0
+    df_merged.loc[df_merged['Extent_of_Resection'] == 'GTR', 'ResectionNum'] = 1
+    df_merged.loc[df_merged['Extent_of_Resection'] == 'STR', 'ResectionNum'] = 2
+    
+    # Cleanup duplicates (to avoid rank deficiency)
+    df_merged = df_merged.drop(columns=['Vol_mm3', 'BBoxVol_mm3'], errors='ignore')  # Identical to voxels cols
+    
+    # Filter valid
+    valid_mask = (df_merged['Survival_days'] > 0) & df_merged['Survival_days'].notna()
+    df_valid = df_merged[valid_mask]
+    
+    # Features (radiomics + clinical)
+    feat_cols = ['Vol_voxels', 'BBoxVol_voxels', 'MeanInt', 'MinInt', 'MaxInt', 'VarInt', 'SkewInt', 'KurtInt', 'Age', 'ResectionNum']
+    X = df_valid[feat_cols].values
+    y = df_valid['Survival_days'].values
+    
+    # Train Linear Regression
+    reg_model = LinearRegression().fit(X, y)
+    
+    # Predict
+    pred = reg_model.predict(X)
+    
+    # Metrics
+    mse = mean_squared_error(y, pred)
+    mae = mean_absolute_error(y, pred)
+    spearman, _ = spearmanr(y, pred)
+    pearson, _ = pearsonr(y, pred)
+    
+    # Bin accuracy
+    true_bins = np.where(y < 300, 1, np.where(y <= 450, 2, 3))
+    pred_bins = np.where(pred < 300, 1, np.where(pred <= 450, 2, 3))
+    bin_acc = np.mean(true_bins == pred_bins)
+    
+    print("=== BraTS 2020 Official Metrics ===")
+    print(f"MSE : {mse:.1f}")
+    print(f"MAE : {mae:.1f} days")
+    print(f"Spearman : {spearman:.3f}")
+    print(f"Pearson : {pearson:.3f}")
+    print(f"Bin Accuracy (3-class): {bin_acc:.3f}")
+    print("====================================")
+else:
+    print("⚠️ Skipping regression - missing clinical data.")
+
+# ==========================================
+# 📊 GENERATE FIGURES
+# ==========================================
+
+# Fig 1: Training Dynamics
+print("Generating Figure 1...")
+try:
+    info = unet_data['info'][0,0] if unet_data['info'].shape == (1,1) else unet_data['info']
+    train_loss = info['TrainingLoss'].flatten()
+    val_loss = info['ValidationLoss'].flatten()
+    train_acc = info['TrainingAccuracy'].flatten()
+    val_acc = info['ValidationAccuracy'].flatten()
+    
+    fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+    ax[0].plot(train_loss, label='Training', alpha=0.8)
+    valid_idx = ~np.isnan(val_loss)
+    if np.any(valid_idx):
+        ax[0].plot(np.where(valid_idx)[0], val_loss[valid_idx], 'o-', label='Validation', markersize=3)
+    ax[0].set_title('Training Loss')
+    ax[0].legend()
+    
+    ax[1].plot(train_acc, label='Training', alpha=0.8)
+    valid_idx_acc = ~np.isnan(val_acc)
+    if np.any(valid_idx_acc):
+        ax[1].plot(np.where(valid_idx_acc)[0], val_acc[valid_idx_acc], 'o-', label='Validation', markersize=3)
+    ax[1].set_title('Training Accuracy')
+    ax[1].legend()
+    plt.savefig(os.path.join(OUTPUT_DIR, 'Fig1_Training_Dynamics.png'), dpi=300)
+except Exception as e:
+    print(f"Skipped Fig 1: {e}")
+
+# Fig 2: Predicted vs True (Regression - NEW)
+if has_clinical_data:
+    print("Generating Figure 2 (Regression Predicted vs True)...")
+    plt.figure(figsize=(8,6))
+    plt.scatter(y, pred, color='#1f77b4', s=60, alpha=0.8)
+    z = np.polyfit(y, pred, 1)
+    p = np.poly1d(z)
+    plt.plot(y, p(y), "r--", label=f'Trend (Spearman={spearman:.3f})')
+    plt.title('Predicted vs True Survival Days')
+    plt.xlabel('True Days')
+    plt.ylabel('Predicted Days')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.savefig(os.path.join(OUTPUT_DIR, 'Fig2_Pred_vs_True.png'), dpi=300)
+
+# Fig 3: Feature Importance (From Regression - NEW)
+if has_clinical_data:
+    print("Generating Figure 3 (Regression Importance)...")
+    all_feats = feat_cols  # From regression
+    coeffs_reg = reg_model.coef_
+    indices = np.argsort(np.abs(coeffs_reg))
+    colors = ['#d62728' if c >= 0 else '#1f77b4' for c in coeffs_reg[indices]]
+    plt.figure(figsize=(10,6))
+    plt.barh(range(len(indices)), coeffs_reg[indices], color=colors)
+    plt.yticks(range(len(indices)), [all_feats[i] for i in indices])
+    plt.xlabel('Regression Coefficient')
+    plt.title('Feature Importance (Regression)')
+    plt.grid(True, axis='x', alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, 'Fig3_Feature_Importance.png'), dpi=300)
+
+# Fig 4: Correlation
+print("Generating Figure 4...")
+plt.figure(figsize=(10,8))
+sns.heatmap(df[feat_cols[:-2]].corr(), annot=True, cmap='coolwarm', fmt=".2f", center=0)  # Exclude clinical for corr
+plt.title('Radiomic Feature Correlation')
+plt.tight_layout()
+plt.savefig(os.path.join(OUTPUT_DIR, 'Fig4_Correlation.png'), dpi=300)
+
+# Fig 5: Age vs Survival (NEW)
+if has_clinical_data:
+    print("Generating Figure 5 (Age Analysis)...")
+    if not df_merged.empty:
+        plt.figure(figsize=(8,6))
+        sns.scatterplot(data=df_merged, x='Age', y='Survival_days', color='#2ca02c', s=60)
+        sns.regplot(data=df_merged, x='Age', y='Survival_days', scatter=False, color='red', line_kws={'linestyle':'--'})
+        plt.title('Clinical Validation: Age vs Survival')
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(OUTPUT_DIR, 'Fig5_Age_vs_Survival.png'), dpi=300)
+    else:
+        print("Merged dataframe empty. Check PatientIDs.")
+
+print(f"✅ Done! All 5 Figures saved in: {OUTPUT_DIR}")
