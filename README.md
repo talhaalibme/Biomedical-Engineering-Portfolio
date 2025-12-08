@@ -17,3 +17,11 @@ A deep learning pipeline for segmenting brain tumors from MRI scans.
 * **Data:** Dataset link provided in `/Datset_Link.txt`.
 * **Key Features:** 2D U-Net architecture, Radiomic feature extraction, Cox Survival Modeling.
 * **Tech Stack:** MATLAB Deep Learning Toolbox, Statistics Toolbox.
+
+### 3. NeuroVoice-DBS: AI-Driven Parkinson’s Detection & Therapy Simulation
+
+*Located in: `/NeuroVoice-DBS`*
+An integrated biomedical framework combining voice-based diagnostics with a closed-loop Deep Brain Stimulation (DBS) simulation.
+* **Code:** The main script PROJECT.m programmatically generates the Simulink model and executes the complete analysis workflow.
+* **Key Features:** ML classification (SVM/Random Forest) of vocal biomarkers (Jitter, Shimmer), spectral tremor analysis using PSD, and fuzzy-logic–based closed-loop DBS simulation.
+* **Tech Stack:** MATLAB, Simulink, Signal Processing Toolbox, Statistics and Machine Learning Toolbox.
